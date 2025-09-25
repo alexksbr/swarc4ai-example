@@ -5,6 +5,7 @@ Command-line interface for the taxi demand prediction system.
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +13,7 @@ from .utils import setup_logging
 from .feature_store import TaxiFeatureStore
 from .model_serving import WaitTimePredictor
 from .monitoring import DemandMonitor
+from .airport_predictor import AirportDemandPredictor
 
 
 def train_model(
@@ -142,6 +144,119 @@ def stress_test(
         sys.exit(1)
 
 
+def compare_demand(
+    data_dir: str,
+    zone_id: int = 161,
+    current_time: Optional[str] = None
+) -> None:
+    """
+    Compare airport demand with city demand for a specific zone.
+    
+    Args:
+        data_dir: Directory containing parquet files
+        zone_id: Zone ID to compare (default: 161 - Times Square)
+        current_time: Current time in format 'YYYY-MM-DD HH:MM:SS' (default: current time)
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Parse current time
+        if current_time:
+            parsed_time = datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')
+        else:
+            # Use a sample time from our data
+            parsed_time = datetime.strptime('2025-01-15 14:00:00', '%Y-%m-%d %H:%M:%S')
+        
+        logger.info(f"Comparing demand for zone {zone_id} at {parsed_time}")
+        
+        # Initialize feature store and load data
+        fs = TaxiFeatureStore({'data_dir': Path(data_dir)})
+        fs.load_all_data()
+        
+        # Initialize airport predictor
+        airport_predictor = AirportDemandPredictor(fs)
+        
+        # Compare locations
+        comparison = airport_predictor.compare_locations(zone_id, parsed_time)
+        
+        # Display results
+        logger.info("=" * 50)
+        logger.info("DEMAND COMPARISON RESULTS")
+        logger.info("=" * 50)
+        logger.info(f"Zone ID: {comparison['city_zone']}")
+        logger.info(f"City Demand (next hour): {comparison['city_demand']} pickups")
+        logger.info(f"Airport Demand (next hour): {comparison['airport_demand']} pickups")
+        logger.info(f"Recommendation: {comparison['recommendation']}")
+        
+        if comparison['recommendation'] == 'AIRPORT':
+            logger.info("💡 Driver should go to the airport for better opportunities")
+        else:
+            logger.info("💡 Driver should stay in the current zone")
+        
+        logger.info("=" * 50)
+        
+    except Exception as e:
+        logger.error(f"Error running demand comparison: {e}")
+        sys.exit(1)
+
+
+def test_revenue(
+    data_dir: str,
+    zone_id: int = 161
+) -> None:
+    """
+    Test revenue recommendations at different times of day.
+    
+    Args:
+        data_dir: Directory containing parquet files
+        zone_id: Zone ID to test (default: 161 - Times Square)
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"Testing revenue recommendations for zone {zone_id}")
+        
+        # Initialize feature store and load data
+        fs = TaxiFeatureStore({'data_dir': Path(data_dir)})
+        fs.load_all_data()
+        
+        # Initialize airport predictor
+        airport_predictor = AirportDemandPredictor(fs)
+        
+        # Run revenue tests
+        results = airport_predictor.test_revenue_recommendations(zone_id)
+        
+        # Display results
+        logger.info("=" * 60)
+        logger.info("REVENUE RECOMMENDATIONS BY TIME OF DAY")
+        logger.info("=" * 60)
+        logger.info(f"Zone ID: {zone_id}")
+        logger.info("")
+        
+        for result in results:
+            revenue = result['revenue']
+            time_display = result['time_display']
+            recommendation = revenue['revenue_recommendation']
+            difference = revenue['revenue_difference']
+            
+            logger.info(f"{time_display}:")
+            logger.info(f"  City: ${revenue['city_revenue_per_hour']:.2f}/hr ({revenue['city_trips_per_hour']:.1f} trips)")
+            logger.info(f"  Airport: ${revenue['airport_revenue_per_hour']:.2f}/hr ({revenue['airport_trips_per_hour']:.1f} trips)")
+            logger.info(f"  → {recommendation} (${difference:.2f}/hr difference)")
+            
+            if recommendation == 'AIRPORT':
+                logger.info("    💰 Airport is more profitable")
+            else:
+                logger.info("    🏙️ Stay in city for better earnings")
+            logger.info("")
+        
+        logger.info("=" * 60)
+        
+    except Exception as e:
+        logger.error(f"Error running revenue test: {e}")
+        sys.exit(1)
+
+
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -177,6 +292,17 @@ def main() -> None:
     stress_parser.add_argument("--requests", type=int, default=100, help="Number of requests")
     stress_parser.add_argument("--zones", help="Comma-separated zone IDs")
     
+    # Compare demand command
+    compare_parser = subparsers.add_parser("compare", help="Compare city vs airport demand")
+    compare_parser.add_argument("data_dir", help="Directory containing parquet files")
+    compare_parser.add_argument("--zone-id", type=int, default=161, help="Zone ID to compare (default: 161 - Times Square)")
+    compare_parser.add_argument("--time", help="Current time in format 'YYYY-MM-DD HH:MM:SS' (default: sample time)")
+    
+    # Test revenue command
+    revenue_parser = subparsers.add_parser("test-revenue", help="Test revenue recommendations throughout the day")
+    revenue_parser.add_argument("data_dir", help="Directory containing parquet files")
+    revenue_parser.add_argument("--zone-id", type=int, default=161, help="Zone ID to test (default: 161 - Times Square)")
+    
     args = parser.parse_args()
     
     # Setup logging
@@ -195,6 +321,17 @@ def main() -> None:
             data_dir=args.data_dir,
             n_requests=args.requests,
             zones=args.zones
+        )
+    elif args.command == "compare":
+        compare_demand(
+            data_dir=args.data_dir,
+            zone_id=args.zone_id,
+            current_time=args.time
+        )
+    elif args.command == "test-revenue":
+        test_revenue(
+            data_dir=args.data_dir,
+            zone_id=args.zone_id
         )
     else:
         parser.print_help()
