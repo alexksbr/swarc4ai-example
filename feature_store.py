@@ -6,6 +6,7 @@ import time
 class TaxiFeatureStore:
     def __init__(self):
         self.df = None
+        self.feature_cache = {}
         
     def load_data(self, parquet_path):
         """Load the parquet file"""
@@ -17,6 +18,13 @@ class TaxiFeatureStore:
         Calculate demand features for a zone at a specific time
         """
         start_total = time.time()
+        cache_key = (zone_id, str(timestamp))
+
+        if cache_key in self.feature_cache:
+            print(f"Cache HIT for zone {zone_id} at {timestamp}")
+            return self.feature_cache[cache_key]
+
+        print(f"Cache MISS for zone {zone_id} at {timestamp}")
 
         # Filter to the zone
         start_filter = time.time()
@@ -54,10 +62,15 @@ class TaxiFeatureStore:
             print(f"  Feature calculation: {feature_calculation_time*1000:.2f}ms")
             print(f"  TOTAL: {total_time*1000:.2f}ms")
 
-        return {
+        features = {
             'pickups_last_hour': pickups_last_hour,
             'pickups_last_3h': pickups_last_3h
         }
+        
+        # Store in cache for future use
+        self.feature_cache[cache_key] = features
+        
+        return features
 
     def calculate_next_hour_pickups(self, zone_id, timestamp):
         """
@@ -80,29 +93,23 @@ class TaxiFeatureStore:
         
         return pickups_next_hour
 
-def main():
-    # Initialize the feature store
-    fs = TaxiFeatureStore()
-    
-    # Load January 2025 data
-    fs.load_data('data/yellow_tripdata_2025-01.parquet')
-    
-    # Test the demand features for a popular zone (e.g., Times Square area - zone 161)
-    # Using a timestamp from the dataset
-    test_timestamp = '2025-01-15 14:00:00'
-    test_zone = 161
-    
-    print(f"\nTesting demand features for Zone {test_zone} at {test_timestamp}")
-    features = fs.compute_demand_features(test_zone, test_timestamp, print_performance=True)
-    
-    print(f"Pickups in last hour: {features['pickups_last_hour']}")
-    print(f"Pickups in last 3 hours: {features['pickups_last_3h']}")
-
-    # Test next hour pickups prediction
-    next_hour_pickups = fs.calculate_next_hour_pickups(test_zone, test_timestamp)
-    print(f"\nPickups in next hour for Zone {test_zone} from {test_timestamp}:")
-    print(f"Expected pickups in next hour: {next_hour_pickups}")
-    
-
-if __name__ == "__main__":
-    main()
+    def stress_test(self, n_requests=100):
+        """
+        Simulate multiple concurrent requests
+        """
+        zones = [161, 162, 237, 236]  # Times Square, Midtown, Upper East, Upper West
+        start = time.time()
+        
+        for i in range(n_requests):
+            zone = zones[i % 4]
+            timestamp = f"2025-01-15 {(i % 24):02d}:00:00"
+            features = self.compute_demand_features(zone, timestamp)
+        
+        total_time = time.time() - start
+        avg_time = total_time / n_requests * 1000
+        
+        print(f"\nStress test results:")
+        print(f"  Total requests: {n_requests}")
+        print(f"  Total time: {total_time:.2f}s")
+        print(f"  Average per request: {avg_time:.2f}ms")
+        print(f"  Requests per second: {n_requests/total_time:.1f}")

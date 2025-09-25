@@ -82,15 +82,34 @@ def main():
             print(f"Average MAPE for last {len(recent_with_actuals)} predictions: {avg_recent_mape:.2f}%")
             print(f"Monitor threshold: {monitor.alert_threshold}%")
     
+    # Demonstrate cache behavior with repeated feature requests
+    print(f"\n=== Demonstrating Cache Behavior ===")
+    print("Making the same feature request twice to show cache hit...")
+    
+    # First call - should be a cache miss
+    print("First call:")
+    features1 = fs.compute_demand_features(161, '2025-01-16 10:00:00', print_performance=True)
+    
+    # Second call - should be a cache hit
+    print("\nSecond call (same zone and time):")
+    features2 = fs.compute_demand_features(161, '2025-01-16 10:00:00', print_performance=True)
+    
+    # Verify they're the same
+    print(f"Features match: {features1 == features2}")
+    print(f"Current cache size: {len(fs.feature_cache)} entries")
+    
     # Simulate real-time monitoring scenario
     print(f"\n=== Simulating Real-time Monitoring ===")
     print("Making new predictions and monitoring them...")
     
-    # Make a few new predictions for different zones/times
+    # Make predictions with repeated scenarios to test cache hits
     test_scenarios = [
-        {'zone': 161, 'time': '2025-01-17 08:00:00', 'description': 'Times Square - Morning'},
-        {'zone': 162, 'time': '2025-01-17 12:00:00', 'description': 'Midtown - Lunch'},
-        {'zone': 161, 'time': '2025-01-17 20:00:00', 'description': 'Times Square - Evening'},
+        {'zone': 161, 'time': '2025-01-17 08:00:00', 'description': 'Times Square - Morning (1st call)'},
+        {'zone': 162, 'time': '2025-01-17 12:00:00', 'description': 'Midtown - Lunch (1st call)'},
+        {'zone': 161, 'time': '2025-01-17 08:00:00', 'description': 'Times Square - Morning (2nd call - CACHE HIT)'},
+        {'zone': 161, 'time': '2025-01-17 20:00:00', 'description': 'Times Square - Evening (1st call)'},
+        {'zone': 162, 'time': '2025-01-17 12:00:00', 'description': 'Midtown - Lunch (2nd call - CACHE HIT)'},
+        {'zone': 161, 'time': '2025-01-17 20:00:00', 'description': 'Times Square - Evening (2nd call - CACHE HIT)'},
     ]
     
     for scenario in test_scenarios:
@@ -127,6 +146,18 @@ def main():
     final_drift = monitor.check_drift(window_size=25)
     print(f"\nFinal drift check: {'DRIFT DETECTED' if final_drift else 'NO DRIFT'}")
     print(f"Total predictions monitored: {len(monitor.predictions)}")
+    
+    # Show cache statistics
+    print(f"\n=== Cache Statistics ===")
+    print(f"Feature cache size: {len(fs.feature_cache)} entries")
+    
+    # Execute stress test
+    print(f"\n=== Running Stress Test ===")
+    fs.stress_test(n_requests=100)
+    
+    # Show final cache statistics
+    print(f"\n=== Final Cache Statistics ===")
+    print(f"Feature cache size after stress test: {len(fs.feature_cache)} entries")
 
 
 if __name__ == "__main__":
