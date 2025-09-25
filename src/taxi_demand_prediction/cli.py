@@ -173,8 +173,15 @@ def compare_demand(
         fs = TaxiFeatureStore({'data_dir': Path(data_dir)})
         fs.load_all_data()
         
-        # Initialize airport predictor
-        airport_predictor = AirportDemandPredictor(fs)
+        # Train a model for predictions
+        logger.info("Training model for demand predictions...")
+        predictor = WaitTimePredictor(fs, {'test_zones': [zone_id]})
+        X_train, y_train = predictor.prepare_training_data(zones=[zone_id], date='2025-01-15')
+        predictor.train(X_train, y_train)
+        logger.info("Model training completed")
+        
+        # Initialize airport predictor with trained model
+        airport_predictor = AirportDemandPredictor(fs, predictor)
         
         # Compare locations
         comparison = airport_predictor.compare_locations(zone_id, parsed_time)
@@ -220,8 +227,15 @@ def test_revenue(
         fs = TaxiFeatureStore({'data_dir': Path(data_dir)})
         fs.load_all_data()
         
-        # Initialize airport predictor
-        airport_predictor = AirportDemandPredictor(fs)
+        # Train a model for predictions
+        logger.info("Training model for demand predictions...")
+        predictor = WaitTimePredictor(fs, {'test_zones': [zone_id]})
+        X_train, y_train = predictor.prepare_training_data(zones=[zone_id], date='2025-01-15')
+        predictor.train(X_train, y_train)
+        logger.info("Model training completed")
+        
+        # Initialize airport predictor with trained model
+        airport_predictor = AirportDemandPredictor(fs, predictor)
         
         # Run revenue tests
         results = airport_predictor.test_revenue_recommendations(zone_id)

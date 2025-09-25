@@ -2,8 +2,9 @@ import random
 from datetime import datetime, timedelta
 
 class AirportDemandPredictor:
-    def __init__(self, taxi_feature_store):
+    def __init__(self, taxi_feature_store, wait_time_predictor=None):
         self.taxi_store = taxi_feature_store
+        self.wait_time_predictor = wait_time_predictor
         
     def generate_flight_arrivals(self, current_time):
         """Simple flight generator - busier during day"""
@@ -41,10 +42,36 @@ class AirportDemandPredictor:
             
         return int(taxi_demand)
     
+    def _get_city_demand_prediction(self, zone_id, current_time):
+        """Get city demand prediction using the trained model or fallback to historical data."""
+        if self.wait_time_predictor and self.wait_time_predictor._is_trained:
+            # Use model inference
+            try:
+                # Get current features for prediction
+                features = self.taxi_store.compute_demand_features(zone_id, current_time)
+                hour = current_time.hour
+                
+                # Make prediction using the trained model
+                prediction = self.wait_time_predictor.predict(
+                    zone_id=zone_id,
+                    hour=hour,
+                    pickups_last_hour=features['pickups_last_hour'],
+                    pickups_last_3h=features['pickups_last_3h']
+                )
+                return prediction
+            except Exception as e:
+                # Fallback to historical data if model prediction fails
+                print(f"Warning: Model prediction failed ({e}), falling back to historical data")
+                return self.taxi_store.calculate_next_hour_pickups(zone_id, current_time)
+        else:
+            # Fallback to historical data if no trained model available
+            print("Warning: No trained model available, using historical data")
+            return self.taxi_store.calculate_next_hour_pickups(zone_id, current_time)
+    
     def compare_locations(self, zone_id, current_time):
         """Should driver stay in zone or go to airport?"""
-        # City demand from your predictor
-        city_demand = self.taxi_store.calculate_next_hour_pickups(zone_id, current_time)
+        # City demand from your predictor (using model inference)
+        city_demand = self._get_city_demand_prediction(zone_id, current_time)
         
         # Airport demand
         airport_demand = self.estimate_airport_demand(current_time)
@@ -63,8 +90,8 @@ class AirportDemandPredictor:
         if isinstance(current_time, str):
             current_time = datetime.strptime(current_time, '%Y-%m-%d %H:%M:%S')
         
-        # Get demand estimates
-        city_demand = self.taxi_store.calculate_next_hour_pickups(zone_id, current_time)
+        # Get demand estimates (using model inference)
+        city_demand = self._get_city_demand_prediction(zone_id, current_time)
         airport_demand = self.estimate_airport_demand(current_time)
         
         # Revenue assumptions (based on NYC taxi data)
