@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime, timedelta
+import numpy as np
 
 class TaxiFeatureStore:
     def __init__(self):
@@ -40,6 +41,25 @@ class TaxiFeatureStore:
             'pickups_last_3h': pickups_last_3h
         }
 
+    def calculate_wait_times(self, zone_id, date):
+        """
+        Calculate actual wait times from the data
+        """
+        # Filter to specific zone and date
+        zone_trips = self.df[self.df['PULocationID'] == zone_id].copy()
+        zone_trips['pickup_date'] = zone_trips['tpep_pickup_datetime'].dt.date
+        zone_trips = zone_trips[zone_trips['pickup_date'] == pd.to_datetime(date).date()]
+        
+        if len(zone_trips) < 2:
+            return []
+        
+        # Sort by pickup time
+        zone_trips = zone_trips.sort_values('tpep_pickup_datetime')
+        
+        wait_times = zone_trips['tpep_pickup_datetime'].diff().dropna().dt.total_seconds().div(60).tolist()
+        
+        return wait_times
+
 def main():
     # Initialize the feature store
     fs = TaxiFeatureStore()
@@ -57,6 +77,13 @@ def main():
     
     print(f"Pickups in last hour: {features['pickups_last_hour']}")
     print(f"Pickups in last 3 hours: {features['pickups_last_3h']}")
+
+    # Test wait times
+    test_date = '2025-01-15'
+    wait_times = fs.calculate_wait_times(test_zone, test_date)
+    print(f"\nWait times for Zone {test_zone} on {test_date}:")
+    print(f"Average wait: {np.mean(wait_times):.1f} minutes")
+    print(f"Max wait: {np.max(wait_times):.1f} minutes")
 
 if __name__ == "__main__":
     main()
