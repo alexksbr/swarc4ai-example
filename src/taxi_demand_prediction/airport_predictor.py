@@ -97,11 +97,20 @@ class AirportDemandPredictor:
         # Revenue assumptions (based on NYC taxi data)
         city_avg_fare = 15.50  # Average city fare
         city_avg_trip_time = 12  # minutes per trip
-        city_trips_per_hour = min(city_demand, 60 / city_avg_trip_time)  # Limited by time
+        max_city_trips_per_hour = 60 / city_avg_trip_time  # Maximum trips limited by time
         
         airport_avg_fare = 45.00  # Higher fare to/from airport
         airport_avg_trip_time = 35  # Longer trips to airport
-        airport_trips_per_hour = min(airport_demand, 60 / airport_avg_trip_time)  # Limited by time
+        max_airport_trips_per_hour = 60 / airport_avg_trip_time  # Maximum trips limited by time
+        
+        # Calculate actual trips per hour based on demand and time constraints
+        # Higher demand means higher probability of getting rides quickly
+        # Use a more realistic model: trips = min(max_trips, demand_factor * max_trips)
+        city_demand_factor = min(1.0, city_demand / 500.0)  # Scale demand to 0-1, normalize around 500 pickups
+        airport_demand_factor = min(1.0, airport_demand / 200.0)  # Scale demand to 0-1, normalize around 200 pickups
+        
+        city_trips_per_hour = min(max_city_trips_per_hour, city_demand_factor * max_city_trips_per_hour)
+        airport_trips_per_hour = min(max_airport_trips_per_hour, airport_demand_factor * max_airport_trips_per_hour)
         
         # Calculate hourly revenue
         city_revenue_per_hour = city_trips_per_hour * city_avg_fare
