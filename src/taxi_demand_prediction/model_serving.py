@@ -14,6 +14,12 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from .constants import (
+    DEFAULT_N_ESTIMATORS, DEFAULT_RANDOM_STATE, DEFAULT_TEST_ZONES,
+    FEATURE_NAMES, HOURS_PER_DAY
+)
+from .utils import calculate_mape, validate_zone_id, validate_hour, ensure_non_negative
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,9 +43,9 @@ class WaitTimePredictor:
         
         # Default configuration
         default_config = {
-            'n_estimators': 100,
-            'random_state': 42,
-            'test_zones': [161, 162]  # Times Square, Midtown
+            'n_estimators': DEFAULT_N_ESTIMATORS,
+            'random_state': DEFAULT_RANDOM_STATE,
+            'test_zones': DEFAULT_TEST_ZONES
         }
         self.config = {**default_config, **(config or {})}
         
@@ -81,11 +87,15 @@ class WaitTimePredictor:
             base_date = pd.to_datetime(date)
             
             # Iterate through each hour of the day (0-23)
-            for hour in range(24):
+            for hour in range(HOURS_PER_DAY):
                 current_timestamp = base_date + timedelta(hours=hour)
                 
                 # For each zone, create training examples
                 for zone_id in zones:
+                    if not validate_zone_id(zone_id):
+                        logger.warning(f"Skipping invalid zone ID: {zone_id}")
+                        continue
+                    
                     try:
                         # Get features at current time T
                         features = self.feature_store.compute_demand_features(zone_id, current_timestamp)
@@ -195,10 +205,16 @@ class WaitTimePredictor:
         if not self._is_trained:
             raise ValueError("Model must be trained before making predictions")
         
+        if not validate_zone_id(zone_id):
+            raise ValueError(f"Invalid zone ID: {zone_id}")
+        
+        if not validate_hour(hour):
+            raise ValueError(f"Invalid hour: {hour}")
+        
         try:
             feature_vector = np.array([[zone_id, hour, pickups_last_hour, pickups_last_3h]])
             prediction = self.model.predict(feature_vector)[0]
-            return max(0, round(prediction))  # Ensure non-negative integer
+            return ensure_non_negative(round(prediction))  # Ensure non-negative integer
             
         except Exception as e:
             logger.error(f"Error making prediction: {e}")
@@ -255,7 +271,7 @@ class WaitTimePredictor:
             rmse = np.sqrt(mse)
             
             # Calculate MAPE with proper zero handling
-            mape = self._calculate_mape(y_test, predictions)
+            mape = calculate_mape(y_test, predictions)
             
             logger.info(f"Evaluation Results:")
             logger.info(f"  Mean Absolute Error (MAE): {mae:.2f}")
@@ -270,33 +286,6 @@ class WaitTimePredictor:
             logger.error(f"Error in train_and_evaluate: {e}")
             raise
 
-    def _calculate_mape(self, actuals: List[int], predictions: List[float]) -> float:
-        """
-        Calculate Mean Absolute Percentage Error with proper zero handling.
-        
-        Args:
-            actuals: Actual values
-            predictions: Predicted values
-            
-        Returns:
-            MAPE as a percentage
-        """
-        epsilon = 1e-8
-        percentage_errors = []
-        
-        for pred, actual in zip(predictions, actuals):
-            if actual == 0 and pred == 0:
-                # Both are zero, perfect prediction
-                percentage_errors.append(0)
-            elif actual == 0:
-                # Actual is zero but prediction is not, use absolute error
-                percentage_errors.append(abs(pred))
-            else:
-                # Standard MAPE calculation
-                percentage_error = abs((actual - pred) / (actual + epsilon)) * 100
-                percentage_errors.append(percentage_error)
-        
-        return np.mean(percentage_errors)
 
     def analyze_errors(
         self,
@@ -382,7 +371,6 @@ class WaitTimePredictor:
             logger.warning("Model is not trained, cannot get feature importance")
             return None
         
-        feature_names = ['zone_id', 'hour', 'pickups_last_hour', 'pickups_last_3h']
         importance_scores = self.model.feature_importances_
         
-        return dict(zip(feature_names, importance_scores))
+        return dict(zip(FEATURE_NAMES, importance_scores))

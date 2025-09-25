@@ -13,6 +13,13 @@ from enum import Enum
 
 import numpy as np
 
+from .constants import (
+    DEFAULT_ALERT_THRESHOLD_MAPE, DEFAULT_DRIFT_WINDOW_SIZE,
+    DEFAULT_MIN_SAMPLES_FOR_DRIFT, DEFAULT_PERFORMANCE_WINDOW_HOURS,
+    DEFAULT_ALERT_COOLDOWN_MINUTES, DEFAULT_DATA_RETENTION_DAYS
+)
+from .utils import calculate_mape, validate_zone_id, validate_hour
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,11 +71,11 @@ class DemandMonitor:
         """
         # Default configuration
         default_config = {
-            'alert_threshold_mape': 30.0,  # 30% MAPE threshold
-            'drift_window_size': 20,
-            'min_samples_for_drift': 10,
-            'performance_window_hours': 24,  # Hours for performance calculation
-            'alert_cooldown_minutes': 60,  # Cooldown between similar alerts
+            'alert_threshold_mape': DEFAULT_ALERT_THRESHOLD_MAPE,
+            'drift_window_size': DEFAULT_DRIFT_WINDOW_SIZE,
+            'min_samples_for_drift': DEFAULT_MIN_SAMPLES_FOR_DRIFT,
+            'performance_window_hours': DEFAULT_PERFORMANCE_WINDOW_HOURS,
+            'alert_cooldown_minutes': DEFAULT_ALERT_COOLDOWN_MINUTES,
         }
         self.config = {**default_config, **(config or {})}
         
@@ -95,7 +102,16 @@ class DemandMonitor:
             actual: Actual value (if available)
             features: Features used for prediction
             model_version: Version of the model used
+            
+        Raises:
+            ValueError: If zone or hour is invalid
         """
+        if not validate_zone_id(zone):
+            raise ValueError(f"Invalid zone ID: {zone}")
+        
+        if not validate_hour(hour):
+            raise ValueError(f"Invalid hour: {hour}")
+        
         try:
             record = PredictionRecord(
                 timestamp=datetime.now(),
@@ -164,7 +180,7 @@ class DemandMonitor:
                 return False
 
             # Calculate MAPE for recent predictions
-            mape = self._calculate_mape([p.actual for p in recent], [p.predicted for p in recent])
+            mape = calculate_mape([p.actual for p in recent], [p.predicted for p in recent])
             threshold = self.config['alert_threshold_mape']
             
             drift_detected = mape > threshold
@@ -225,7 +241,7 @@ class DemandMonitor:
             mae = np.mean([abs(a - p) for a, p in zip(actuals, predictions)])
             mse = np.mean([(a - p)**2 for a, p in zip(actuals, predictions)])
             rmse = np.sqrt(mse)
-            mape = self._calculate_mape(actuals, predictions)
+            mape = calculate_mape(actuals, predictions)
             
             # Zone-specific metrics
             zone_metrics = {}
@@ -238,7 +254,7 @@ class DemandMonitor:
                 zone_metrics[zone] = {
                     'count': len(zone_preds),
                     'mae': np.mean([abs(a - p) for a, p in zip(zone_actuals, zone_predictions)]),
-                    'mape': self._calculate_mape(zone_actuals, zone_predictions)
+                    'mape': calculate_mape(zone_actuals, zone_predictions)
                 }
             
             metrics = {
@@ -292,7 +308,7 @@ class DemandMonitor:
             logger.error(f"Error getting alerts: {e}")
             return []
 
-    def clear_old_data(self, days_to_keep: int = 7) -> Dict[str, int]:
+    def clear_old_data(self, days_to_keep: int = DEFAULT_DATA_RETENTION_DAYS) -> Dict[str, int]:
         """
         Clear old predictions and alerts to manage memory.
         
@@ -329,33 +345,6 @@ class DemandMonitor:
             logger.error(f"Error clearing old data: {e}")
             return {"error": str(e)}
 
-    def _calculate_mape(self, actuals: List[Union[int, float]], predictions: List[float]) -> float:
-        """
-        Calculate Mean Absolute Percentage Error with proper zero handling.
-        
-        Args:
-            actuals: Actual values
-            predictions: Predicted values
-            
-        Returns:
-            MAPE as a percentage
-        """
-        if not actuals or not predictions or len(actuals) != len(predictions):
-            return 0.0
-        
-        epsilon = 1e-8
-        percentage_errors = []
-        
-        for pred, actual in zip(predictions, actuals):
-            if actual == 0 and pred == 0:
-                percentage_errors.append(0)
-            elif actual == 0:
-                percentage_errors.append(abs(pred))
-            else:
-                percentage_error = abs((actual - pred) / (actual + epsilon)) * 100
-                percentage_errors.append(percentage_error)
-        
-        return np.mean(percentage_errors)
 
     def _check_prediction_quality(self, record: PredictionRecord) -> None:
         """
@@ -370,7 +359,7 @@ class DemandMonitor:
         try:
             # Calculate error for this prediction
             error = abs(record.actual - record.predicted)
-            percentage_error = self._calculate_mape([record.actual], [record.predicted])
+            percentage_error = calculate_mape([record.actual], [record.predicted])
             
             # Check if error is unusually high
             if percentage_error > self.config['alert_threshold_mape'] * 2:  # 2x threshold for single prediction

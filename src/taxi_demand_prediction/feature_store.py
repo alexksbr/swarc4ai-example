@@ -14,7 +14,11 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-# Import will be handled at runtime to avoid circular imports
+from .constants import (
+    DEFAULT_PARQUET_FILES, DEFAULT_CACHE_TTL_HOURS, REQUIRED_COLUMNS,
+    LOOKBACK_HOURS_1, LOOKBACK_HOURS_3
+)
+from .utils import validate_zone_id, validate_hour
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +41,8 @@ class TaxiFeatureStore:
         # Default configuration
         default_config = {
             'data_dir': Path("data"),
-            'parquet_files': [
-                "yellow_tripdata_2025-01.parquet",
-                "yellow_tripdata_2025-02.parquet", 
-                "yellow_tripdata_2025-03.parquet"
-            ],
-            'cache_ttl_hours': 1.0
+            'parquet_files': DEFAULT_PARQUET_FILES,
+            'cache_ttl_hours': DEFAULT_CACHE_TTL_HOURS
         }
         self.config = {**default_config, **(config or {})}
         self.df: Optional[pd.DataFrame] = None
@@ -72,8 +72,7 @@ class TaxiFeatureStore:
                 raise ValueError(f"Parquet file is empty: {parquet_path}")
             
             # Validate required columns
-            required_columns = ['PULocationID', 'tpep_pickup_datetime']
-            missing_columns = [col for col in required_columns if col not in new_df.columns]
+            missing_columns = [col for col in REQUIRED_COLUMNS if col not in new_df.columns]
             if missing_columns:
                 raise ValueError(f"Missing required columns: {missing_columns}")
             
@@ -137,6 +136,9 @@ class TaxiFeatureStore:
         """
         if not self._is_data_loaded or self.df is None:
             raise ValueError("Data must be loaded before computing features")
+        
+        if not validate_zone_id(zone_id):
+            raise ValueError(f"Invalid zone ID: {zone_id}")
         
         if ttl_hours is None:
             ttl_hours = self.config['cache_ttl_hours']
@@ -212,8 +214,8 @@ class TaxiFeatureStore:
         # Calculate time windows
         start_feature_calculation = time.time()
         end_time = pd.to_datetime(timestamp)
-        start_time_1h = end_time - timedelta(hours=1)
-        start_time_3h = end_time - timedelta(hours=3)
+        start_time_1h = end_time - timedelta(hours=LOOKBACK_HOURS_1)
+        start_time_3h = end_time - timedelta(hours=LOOKBACK_HOURS_3)
 
         # Count pickups in different time windows
         pickups_last_hour = len(zone_trips[
@@ -260,6 +262,9 @@ class TaxiFeatureStore:
         if not self._is_data_loaded or self.df is None:
             raise ValueError("Data must be loaded before calculating pickups")
         
+        if not validate_zone_id(zone_id):
+            raise ValueError(f"Invalid zone ID: {zone_id}")
+        
         try:
             # Filter to the zone
             zone_trips = self.df[self.df['PULocationID'] == zone_id].copy()
@@ -294,7 +299,8 @@ class TaxiFeatureStore:
             Dictionary with performance statistics
         """
         if zones is None:
-            zones = [161, 162, 237, 236]  # Times Square, Midtown, Upper East, Upper West
+            from .constants import DEFAULT_TEST_ZONES
+            zones = DEFAULT_TEST_ZONES + [237, 236]  # Add Upper East, Upper West
         
         start = time.time()
         

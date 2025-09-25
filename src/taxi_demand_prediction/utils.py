@@ -5,7 +5,13 @@ Utility functions for the taxi demand prediction system.
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Union
+
+import numpy as np
+
+from .constants import (
+    MIN_ZONE_ID, MAX_ZONE_ID, HOURS_PER_DAY, EPSILON_FOR_MAPE
+)
 
 
 def setup_logging(
@@ -60,8 +66,7 @@ def validate_zone_id(zone_id: int) -> bool:
     Returns:
         True if zone ID appears valid, False otherwise
     """
-    # NYC taxi zones are typically between 1 and 265
-    return isinstance(zone_id, int) and 1 <= zone_id <= 265
+    return isinstance(zone_id, int) and MIN_ZONE_ID <= zone_id <= MAX_ZONE_ID
 
 
 def validate_hour(hour: int) -> bool:
@@ -74,4 +79,95 @@ def validate_hour(hour: int) -> bool:
     Returns:
         True if hour is valid, False otherwise
     """
-    return isinstance(hour, int) and 0 <= hour <= 23
+    return isinstance(hour, int) and 0 <= hour < HOURS_PER_DAY
+
+
+def calculate_mape(
+    actuals: List[Union[int, float]], 
+    predictions: List[float]
+) -> float:
+    """
+    Calculate Mean Absolute Percentage Error with proper zero handling.
+    
+    This is a shared utility function to avoid code duplication across modules.
+    
+    Args:
+        actuals: Actual values
+        predictions: Predicted values
+        
+    Returns:
+        MAPE as a percentage
+        
+    Raises:
+        ValueError: If inputs are invalid
+    """
+    if not actuals or not predictions:
+        raise ValueError("Actuals and predictions cannot be empty")
+    
+    if len(actuals) != len(predictions):
+        raise ValueError("Actuals and predictions must have the same length")
+    
+    percentage_errors = []
+    
+    for pred, actual in zip(predictions, actuals):
+        if actual == 0 and pred == 0:
+            # Both are zero, perfect prediction
+            percentage_errors.append(0.0)
+        elif actual == 0:
+            # Actual is zero but prediction is not, use absolute error
+            percentage_errors.append(abs(pred))
+        else:
+            # Standard MAPE calculation
+            percentage_error = abs((actual - pred) / (actual + EPSILON_FOR_MAPE)) * 100
+            percentage_errors.append(percentage_error)
+    
+    return float(np.mean(percentage_errors))
+
+
+def validate_config_dict(config: dict, required_keys: List[str]) -> None:
+    """
+    Validate that a configuration dictionary contains required keys.
+    
+    Args:
+        config: Configuration dictionary to validate
+        required_keys: List of required keys
+        
+    Raises:
+        ValueError: If required keys are missing
+    """
+    if not isinstance(config, dict):
+        raise ValueError("Config must be a dictionary")
+    
+    missing_keys = [key for key in required_keys if key not in config]
+    if missing_keys:
+        raise ValueError(f"Missing required configuration keys: {missing_keys}")
+
+
+def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """
+    Safely divide two numbers, returning default if denominator is zero.
+    
+    Args:
+        numerator: Numerator value
+        denominator: Denominator value
+        default: Default value to return if denominator is zero
+        
+    Returns:
+        Division result or default value
+    """
+    if abs(denominator) < EPSILON_FOR_MAPE:
+        return default
+    return numerator / denominator
+
+
+def ensure_non_negative(value: Union[int, float]) -> Union[int, float]:
+    """
+    Ensure a value is non-negative.
+    
+    Args:
+        value: Input value
+        
+    Returns:
+        Maximum of value and 0
+    """
+    return max(0, value)

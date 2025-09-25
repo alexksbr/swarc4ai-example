@@ -9,11 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .utils import setup_logging
+from .utils import setup_logging, validate_zone_id
 from .feature_store import TaxiFeatureStore
 from .model_serving import WaitTimePredictor
 from .monitoring import DemandMonitor
 from .airport_predictor import AirportDemandPredictor
+from .constants import DEFAULT_TEST_ZONES
 
 
 def train_model(
@@ -39,8 +40,12 @@ def train_model(
         # Parse zones
         if zones:
             zone_list = [int(z.strip()) for z in zones.split(",")]
+            # Validate zone IDs
+            invalid_zones = [z for z in zone_list if not validate_zone_id(z)]
+            if invalid_zones:
+                raise ValueError(f"Invalid zone IDs: {invalid_zones}")
         else:
-            zone_list = [161, 162]
+            zone_list = DEFAULT_TEST_ZONES.copy()
         
         logger.info(f"Training model with zones: {zone_list}")
         
