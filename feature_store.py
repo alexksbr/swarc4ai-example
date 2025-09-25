@@ -41,24 +41,26 @@ class TaxiFeatureStore:
             'pickups_last_3h': pickups_last_3h
         }
 
-    def calculate_wait_times(self, zone_id, date):
+    def calculate_next_hour_pickups(self, zone_id, timestamp):
         """
-        Calculate actual wait times from the data
+        Calculate pickups in the NEXT hour from a given timestamp
         """
-        # Filter to specific zone and date
-        zone_trips = self.df[self.df['PULocationID'] == zone_id].copy()
-        zone_trips['pickup_date'] = zone_trips['tpep_pickup_datetime'].dt.date
-        zone_trips = zone_trips[zone_trips['pickup_date'] == pd.to_datetime(date).date()]
+        # Filter to the zone
+        zone_trips = self.df[self.df['PULocationID'] == zone_id]
         
-        if len(zone_trips) < 2:
-            return []
+        if not pd.api.types.is_datetime64_any_dtype(zone_trips['tpep_pickup_datetime']):
+            zone_trips = zone_trips.copy()
+            zone_trips['tpep_pickup_datetime'] = pd.to_datetime(zone_trips['tpep_pickup_datetime'])
+
+        current_time = pd.to_datetime(timestamp)
+        next_hour_end = current_time + timedelta(hours=1)
+
+        pickups_next_hour = zone_trips[
+            (zone_trips['tpep_pickup_datetime'] > current_time) &
+            (zone_trips['tpep_pickup_datetime'] <= next_hour_end)
+        ].shape[0]
         
-        # Sort by pickup time
-        zone_trips = zone_trips.sort_values('tpep_pickup_datetime')
-        
-        wait_times = zone_trips['tpep_pickup_datetime'].diff().dropna().dt.total_seconds().div(60).tolist()
-        
-        return wait_times
+        return pickups_next_hour
 
 def main():
     # Initialize the feature store
@@ -78,12 +80,11 @@ def main():
     print(f"Pickups in last hour: {features['pickups_last_hour']}")
     print(f"Pickups in last 3 hours: {features['pickups_last_3h']}")
 
-    # Test wait times
-    test_date = '2025-01-15'
-    wait_times = fs.calculate_wait_times(test_zone, test_date)
-    print(f"\nWait times for Zone {test_zone} on {test_date}:")
-    print(f"Average wait: {np.mean(wait_times):.1f} minutes")
-    print(f"Max wait: {np.max(wait_times):.1f} minutes")
+    # Test next hour pickups prediction
+    next_hour_pickups = fs.calculate_next_hour_pickups(test_zone, test_timestamp)
+    print(f"\nPickups in next hour for Zone {test_zone} from {test_timestamp}:")
+    print(f"Expected pickups in next hour: {next_hour_pickups}")
+    
 
 if __name__ == "__main__":
     main()
