@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
+import time
 
 class TaxiFeatureStore:
     def __init__(self):
@@ -11,17 +12,24 @@ class TaxiFeatureStore:
         self.df = pd.read_parquet(parquet_path)
         print(f"Loaded {len(self.df)} trips")
         
-    def compute_demand_features(self, zone_id, timestamp):
+    def compute_demand_features(self, zone_id, timestamp, print_performance=False):
         """
         Calculate demand features for a zone at a specific time
         """
+        start_total = time.time()
+
         # Filter to the zone
+        start_filter = time.time()
         zone_trips = self.df[self.df['PULocationID'] == zone_id]
-        
+        filter_time = time.time() - start_filter
+
+        start_convert = time.time()
         if not pd.api.types.is_datetime64_any_dtype(zone_trips['tpep_pickup_datetime']):
             zone_trips = zone_trips.copy()
             zone_trips['tpep_pickup_datetime'] = pd.to_datetime(zone_trips['tpep_pickup_datetime'])
+        convert_time = time.time() - start_convert
 
+        start_feature_calculation = time.time()
         end_time = pd.to_datetime(timestamp)
         start_time_1h = end_time - timedelta(hours=1)
         start_time_3h = end_time - timedelta(hours=3)
@@ -35,7 +43,17 @@ class TaxiFeatureStore:
             (zone_trips['tpep_pickup_datetime'] > start_time_3h) &
             (zone_trips['tpep_pickup_datetime'] <= end_time)
         ].shape[0]
+        feature_calculation_time = time.time() - start_feature_calculation
+
+        total_time = time.time() - start_total
         
+        if print_performance:
+            print(f"Performance breakdown:")
+            print(f"  Filter to zone: {filter_time*1000:.2f}ms")
+            print(f"  Datetime convert: {convert_time*1000:.2f}ms")
+            print(f"  Feature calculation: {feature_calculation_time*1000:.2f}ms")
+            print(f"  TOTAL: {total_time*1000:.2f}ms")
+
         return {
             'pickups_last_hour': pickups_last_hour,
             'pickups_last_3h': pickups_last_3h
@@ -75,7 +93,7 @@ def main():
     test_zone = 161
     
     print(f"\nTesting demand features for Zone {test_zone} at {test_timestamp}")
-    features = fs.compute_demand_features(test_zone, test_timestamp)
+    features = fs.compute_demand_features(test_zone, test_timestamp, print_performance=True)
     
     print(f"Pickups in last hour: {features['pickups_last_hour']}")
     print(f"Pickups in last 3 hours: {features['pickups_last_3h']}")
