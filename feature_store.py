@@ -13,7 +13,7 @@ class TaxiFeatureStore:
         self.df = pd.read_parquet(parquet_path)
         print(f"Loaded {len(self.df)} trips")
         
-    def compute_demand_features(self, zone_id, timestamp, print_performance=False):
+    def compute_demand_features(self, zone_id, timestamp, print_performance=False, ttl_hours=1):
         """
         Calculate demand features for a zone at a specific time
         """
@@ -22,7 +22,11 @@ class TaxiFeatureStore:
 
         if cache_key in self.feature_cache:
             print(f"Cache HIT for zone {zone_id} at {timestamp}")
-            return self.feature_cache[cache_key]
+            cached_time = self.feature_cache[cache_key].get('cached_at')
+            age_hours = (datetime.now() - cached_time).total_seconds() / 3600
+            
+            if age_hours < ttl_hours:
+                return self.feature_cache[cache_key]['features']
 
         print(f"Cache MISS for zone {zone_id} at {timestamp}")
 
@@ -62,15 +66,19 @@ class TaxiFeatureStore:
             print(f"  Feature calculation: {feature_calculation_time*1000:.2f}ms")
             print(f"  TOTAL: {total_time*1000:.2f}ms")
 
-        features = {
-            'pickups_last_hour': pickups_last_hour,
-            'pickups_last_3h': pickups_last_3h
+        entry = {
+            "features": {
+                'pickups_last_hour': pickups_last_hour,
+                'pickups_last_3h': pickups_last_3h,
+            }, 
+            "cached_at": datetime.now()
         }
+
         
         # Store in cache for future use
-        self.feature_cache[cache_key] = features
+        self.feature_cache[cache_key] = entry
         
-        return features
+        return entry["features"]
 
     def calculate_next_hour_pickups(self, zone_id, timestamp):
         """
